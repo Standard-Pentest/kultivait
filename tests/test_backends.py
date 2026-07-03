@@ -1,4 +1,17 @@
-from kultivait.backends import OllamaBackend, to_ollama_messages, from_ollama_tool_calls
+from kultivait.backends import (
+    OllamaBackend,
+    from_ollama_tool_calls,
+    is_truncated,
+    to_ollama_messages,
+)
+
+
+def test_truncation_detected_at_context_boundary():
+    # ollama truncates to num_ctx - 1 and reports that as prompt_eval_count
+    # (observed live: limit=8191 for the 8192 default, limit=32767 for 32768)
+    assert is_truncated(prompt_eval_count=8191, num_ctx=8192) is True
+    assert is_truncated(prompt_eval_count=32767, num_ctx=32768) is True
+    assert is_truncated(prompt_eval_count=5000, num_ctx=8192) is False
 
 
 def test_payload_sets_num_ctx_to_avoid_input_truncation():

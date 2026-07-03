@@ -11,7 +11,12 @@ class Ledger:
         self._baseline_in = baseline_in  # USD per million input tokens at a frontier model
         self._baseline_out = baseline_out  # USD per million output tokens
 
-    def record(self, *, tier: str, local: bool, tokens_in: int, tokens_out: int, cost_usd: float) -> None:
+    def record(
+        self, *, tier: str, local: bool, tokens_in: int, tokens_out: int, cost_usd: float, **extra
+    ) -> None:
+        """Extra keyword fields (routing decision metadata, truncation flags,
+        prompt snippets) are stored verbatim — the ledger is the analysis
+        substrate, so silent failure modes must leave a trace here."""
         entry = {
             "ts": time.time(),
             "tier": tier,
@@ -19,6 +24,7 @@ class Ledger:
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
             "cost_usd": cost_usd,
+            **extra,
         }
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a") as f:
@@ -33,6 +39,7 @@ class Ledger:
         tokens_out = sum(e["tokens_out"] for e in entries)
         spent = sum(e["cost_usd"] for e in entries)
         baseline = (tokens_in * self._baseline_in + tokens_out * self._baseline_out) / 1e6
+        escalations = [e for e in entries if e.get("tool_fallback")]
         return {
             "prompts": len(entries),
             "local_prompts": sum(1 for e in entries if e["local"]),
@@ -40,4 +47,16 @@ class Ledger:
             "spent_usd": spent,
             "baseline_usd": baseline,
             "saved_usd": baseline - spent,
+            "escalations": {
+                "count": len(escalations),
+                "recent": [
+                    {
+                        "requested": e.get("requested_tier"),
+                        "served": e["tier"],
+                        "snippet": e.get("snippet", ""),
+                    }
+                    for e in escalations[-5:]
+                ],
+            },
+            "truncated_inputs": sum(1 for e in entries if e.get("truncated")),
         }

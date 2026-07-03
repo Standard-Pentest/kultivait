@@ -48,14 +48,28 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="kultivait")
 
-    def _record(tier: str, completion: Completion) -> None:
+    def _record(tier: str, completion: Completion, **decision_meta) -> None:
         ledger.record(
             tier=tier,
             local=completion.local,
             tokens_in=completion.tokens_in,
             tokens_out=completion.tokens_out,
             cost_usd=completion.cost_usd,
+            truncated=completion.truncated,
+            **decision_meta,
         )
+
+    def _decision_meta(decision: Decision, tool_fallback: bool, messages: list[dict]) -> dict:
+        user_text = next(
+            (m["content"] for m in reversed(messages) if m.get("role") == "user"), ""
+        )
+        return {
+            "requested_tier": decision.tier,
+            "margin": round(decision.margin, 4),
+            "escalated": decision.escalated,
+            "tool_fallback": tool_fallback,
+            "snippet": user_text[:80],
+        }
 
     def _classify(messages: list[dict]) -> "Decision":
         user_text = next(
@@ -83,6 +97,7 @@ def create_app(
         tier, tool_fallback = (
             _tool_capable_tier(decision.tier) if tools else (decision.tier, False)
         )
+        meta = _decision_meta(decision, tool_fallback, messages)
 
         def kultivait_meta(local: bool) -> dict:
             return {
@@ -111,7 +126,7 @@ def create_app(
                 yield chunk({"role": "assistant"})
                 for item in backends[tier].stream(messages, tools=tools):
                     if isinstance(item, Completion):
-                        _record(tier, item)
+                        _record(tier, item, **meta)
                         if item.tool_calls:
                             yield chunk(
                                 {
@@ -131,7 +146,7 @@ def create_app(
             return StreamingResponse(sse(), media_type="text/event-stream")
 
         completion = backends[tier].complete(messages, tools=tools)
-        _record(tier, completion)
+        _record(tier, completion, **meta)
         message: dict = {"role": "assistant", "content": completion.text or None}
         if completion.tool_calls:
             message["tool_calls"] = completion.tool_calls
@@ -162,6 +177,7 @@ def create_app(
         if system:
             messages = [{"role": "system", "content": _text_of(system)}, *messages]
         decision = _classify(messages)
+        meta = _decision_meta(decision, False, messages)
         msg_id = f"kult-{uuid.uuid4().hex[:12]}"
 
         if body.get("stream"):
@@ -191,7 +207,7 @@ def create_app(
                 )
                 for item in backends[decision.tier].stream(messages):
                     if isinstance(item, Completion):
-                        _record(decision.tier, item)
+                        _record(decision.tier, item, **meta)
                         yield event("content_block_stop", {"index": 0})
                         yield event(
                             "message_delta",
@@ -213,7 +229,7 @@ def create_app(
             return StreamingResponse(sse(), media_type="text/event-stream")
 
         completion = backends[decision.tier].complete(messages)
-        _record(decision.tier, completion)
+        _record(decision.tier, completion, **meta)
         return {
             "id": msg_id,
             "type": "message",

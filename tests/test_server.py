@@ -308,6 +308,27 @@ def test_routes_chat_completion_to_classified_backend(tmp_path):
     assert len(backends["claude"].calls) == 0
 
 
+def test_ledger_entry_carries_full_decision_metadata(tmp_path):
+    import json
+
+    client, _ = make_client(tmp_path, embed=lambda text: np.array([0.1, 0.9]))
+    client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "auto",
+            "tools": TOOLS,
+            "messages": [{"role": "user", "content": "draft a technical spec for the PDF report"}],
+        },
+    )
+    entry = json.loads((tmp_path / "ledger.jsonl").read_text())
+    assert entry["tier"] == "llama3.1:8b"          # served (tool fallback)
+    assert entry["requested_tier"] == "claude"     # what the router wanted
+    assert entry["tool_fallback"] is True
+    assert "margin" in entry
+    assert entry["snippet"].startswith("draft a technical spec")
+    assert entry["truncated"] is False
+
+
 def test_completion_is_recorded_in_ledger(tmp_path):
     client, _ = make_client(tmp_path, embed=lambda text: np.array([0.1, 0.9]))
     client.post(

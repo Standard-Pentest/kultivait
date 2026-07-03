@@ -17,6 +17,14 @@ class Completion:
     cost_usd: float
     local: bool
     tool_calls: "list[dict] | None" = None
+    truncated: bool = False
+
+
+def is_truncated(prompt_eval_count: int, num_ctx: int) -> bool:
+    """ollama silently clips over-long prompts to num_ctx - 1 tokens, keeping
+    the tail and amputating the head (system prompts, skill instructions).
+    A prompt_eval_count pinned at the boundary is the tell."""
+    return prompt_eval_count >= num_ctx - 1
 
 
 class Backend(Protocol):
@@ -106,13 +114,15 @@ class OllamaBackend:
         r.raise_for_status()
         data = r.json()
         raw_calls = data["message"].get("tool_calls") or []
+        tokens_in = data.get("prompt_eval_count", 0)
         return Completion(
             text=data["message"]["content"],
-            tokens_in=data.get("prompt_eval_count", 0),
+            tokens_in=tokens_in,
             tokens_out=data.get("eval_count", 0),
             cost_usd=0.0,
             local=True,
             tool_calls=from_ollama_tool_calls(raw_calls) if raw_calls else None,
+            truncated=is_truncated(tokens_in, self.num_ctx),
         )
 
     def stream(
@@ -140,13 +150,15 @@ class OllamaBackend:
                 if delta:
                     parts.append(delta)
                     yield delta
+        tokens_in = data.get("prompt_eval_count", 0)
         yield Completion(
             text="".join(parts),
-            tokens_in=data.get("prompt_eval_count", 0),
+            tokens_in=tokens_in,
             tokens_out=data.get("eval_count", 0),
             cost_usd=0.0,
             local=True,
             tool_calls=from_ollama_tool_calls(raw_calls) if raw_calls else None,
+            truncated=is_truncated(tokens_in, self.num_ctx),
         )
 
 

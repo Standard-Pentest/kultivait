@@ -133,6 +133,31 @@ firing), record it to the ledger, and add an `escalations` section to
 `harvest()` output. Small, reversible, and it generates the data to decide
 whether the louder versions are worth it.
 
+### STATUS UPDATE (2026-07-03, follow-up session)
+
+**Triage of the "off the rails" note — RESOLVED, root cause confirmed.**
+ollama server logs show the failing brainstorming-skill turn was truncated
+(00:26:35: prompt=13223 → 8191, keep=4): ollama kept the first 4 tokens and
+the most recent 8187, amputating ~5K tokens from the HEAD — where Pi's system
+prompt and the skill instructions live. The model never saw the skill it was
+running. Replaying the same conversation post-num_ctx-fix: the model now
+answers "create it" with a correct contextual `write` tool call. Proxy
+tool-call plumbing exonerated. Residual: one 36,413-token prompt clipped even
+at 32K — truncation still possible, hence detection below.
+
+**Passive escalation log + truncation detection — SHIPPED (31 tests).**
+- Every ledger entry now records: `requested_tier`, `margin`, `escalated`,
+  `tool_fallback`, `truncated`, `snippet` (first 80 chars of user text).
+- `Completion.truncated` set by `is_truncated(prompt_eval_count, num_ctx)`
+  (ollama pins prompt_eval_count at num_ctx - 1 when clipping).
+- `harvest()` gains `escalations` {count, recent[]} and `truncated_inputs`.
+- Live-verified with the user's actual spec prompt: requested=claude,
+  served=qwen3:14b, tool_fallback=true, margin=0.0057 (razor-thin!).
+
+**Next: the cloud-ready brief (option 3 above)** — on would-escalate, run the
+pruning gate and emit a paste-ready distilled brief + recommended target,
+surfaced via `kultivait escalations` / metadata, never the response body.
+
 ---
 
 ## Roadmap (unstarted, roughly ordered)
