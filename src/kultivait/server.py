@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
 from kultivait.backends import Backend, Completion
+from kultivait.escalations import EscalationStore
 from kultivait.gates import Gate
 from kultivait.ledger import Ledger
 from kultivait.router import Decision, Router
@@ -45,6 +46,7 @@ def create_app(
     backends: dict[str, Backend],
     ledger: Ledger,
     gate: Gate,
+    escalations: EscalationStore,
 ) -> FastAPI:
     app = FastAPI(title="kultivait")
 
@@ -97,7 +99,15 @@ def create_app(
         tier, tool_fallback = (
             _tool_capable_tier(decision.tier) if tools else (decision.tier, False)
         )
+        # A silent downgrade must leave a recoverable trail: archive the full
+        # conversation so a paste-ready brief can be distilled on demand.
+        escalation_id = (
+            escalations.save(messages, requested_tier=decision.tier)
+            if tool_fallback
+            else None
+        )
         meta = _decision_meta(decision, tool_fallback, messages)
+        meta["escalation_id"] = escalation_id
 
         def kultivait_meta(local: bool) -> dict:
             return {
@@ -105,6 +115,7 @@ def create_app(
                 "margin": decision.margin,
                 "escalated": decision.escalated,
                 "tool_fallback": tool_fallback,
+                "escalation_id": escalation_id,
                 "local": local,
             }
 

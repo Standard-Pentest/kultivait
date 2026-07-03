@@ -93,6 +93,22 @@ loops and can't return client-side tool calls. The response's `kultivait`
 metadata reports `tool_fallback: true` when this happens. Anthropic-endpoint
 tool support is not yet implemented.
 
+### Escalations: when the garden isn't enough
+
+Every tool-fallback is also archived as an *escalation* — the full
+conversation, saved instantly off the request path. When you decide a local
+answer wasn't good enough:
+
+```bash
+kultivait escalations              # list cloud-worthy prompts served locally
+kultivait escalations --brief      # distill the latest into a paste-ready brief
+```
+
+The brief (TASK / CONTEXT / PROGRESS / NEEDED) is distilled by your local
+model and names the recommended target — "take this to Claude" — so
+escalating costs one paste instead of re-explaining the whole session.
+Routing knows its limits; hygiene makes the handoff cheap.
+
 ## Requirements
 
 - [ollama](https://ollama.com) running locally with `nomic-embed-text`,

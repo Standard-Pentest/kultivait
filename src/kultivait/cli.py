@@ -10,6 +10,12 @@ import httpx
 import numpy as np
 
 from kultivait.backends import CLIBackend, OllamaBackend
+from kultivait.escalations import (
+    HANDOFF_PROMPT,
+    RECOMMENDED_TARGETS,
+    EscalationStore,
+    render_transcript,
+)
 from kultivait.gates import Gate
 from kultivait.ledger import Ledger
 from kultivait.router import Router
@@ -27,6 +33,7 @@ DISTILL_MODEL = os.environ.get("KULTIVAIT_DISTILL_MODEL", "gemma4:latest")
 NUM_CTX = int(os.environ.get("KULTIVAIT_NUM_CTX", "32768"))
 LEDGER_PATH = Path.home() / ".kultivait" / "ledger.jsonl"
 COMPOST_DIR = Path.home() / ".kultivait" / "compost"
+ESCALATIONS_DIR = Path.home() / ".kultivait" / "escalations"
 
 
 def _embed_batch(texts: list[str]) -> np.ndarray:
@@ -95,6 +102,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
         backends=build_backends(),
         ledger=Ledger(LEDGER_PATH),
         gate=build_gate(),
+        escalations=EscalationStore(ESCALATIONS_DIR),
     )
     print(f"kultivait listening on http://localhost:{args.port}", file=sys.stderr)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
@@ -116,6 +124,38 @@ def cmd_prune(args: argparse.Namespace) -> None:
         f"\n--- pruned {result.tokens_before} -> {result.tokens_after} tokens "
         f"({100 * (1 - result.tokens_after / result.tokens_before):.0f}% composted, "
         f"recoverable: {result.compost_id})",
+        file=sys.stderr,
+    )
+
+
+def cmd_escalations(args: argparse.Namespace) -> None:
+    import datetime
+
+    store = EscalationStore(ESCALATIONS_DIR)
+    listed = store.list()
+    if not listed:
+        print("no escalations recorded — the local garden has been enough")
+        return
+
+    if not args.brief:
+        for e in listed:
+            when = datetime.datetime.fromtimestamp(e.ts).strftime("%m-%d %H:%M")
+            print(f"{e.id}  {when}  wanted {e.requested_tier:<12}  {e.snippet}")
+        print(f"\n{len(listed)} escalation(s). Distill one: kultivait escalations --brief [ID]")
+        return
+
+    target = args.id or listed[-1].id
+    record = next(e for e in listed if e.id == target)
+    transcript = render_transcript(store.load_messages(target))
+    print(f"distilling {target} with {DISTILL_MODEL}...", file=sys.stderr)
+    gate = Gate(generate=_distill_generate, compost_dir=COMPOST_DIR, template=HANDOFF_PROMPT)
+    result = gate.distill(transcript, from_phase="local", to_phase="cloud")
+    recommended = RECOMMENDED_TARGETS.get(record.requested_tier, record.requested_tier)
+    print(f"# Escalation brief — take this to {recommended}\n")
+    print(result.brief)
+    print(
+        f"\n--- {result.tokens_before} -> {result.tokens_after} tokens · "
+        f"full conversation recoverable: {target}",
         file=sys.stderr,
     )
 
@@ -142,6 +182,13 @@ def main() -> None:
     prune.add_argument("--from", dest="from_phase", default="previous")
     prune.add_argument("--to", dest="to_phase", default="next")
     prune.set_defaults(func=cmd_prune)
+
+    esc = sub.add_parser(
+        "escalations", help="list cloud-worthy prompts served locally; distill a handoff brief"
+    )
+    esc.add_argument("id", nargs="?", help="escalation id (default: most recent)")
+    esc.add_argument("--brief", action="store_true", help="distill a paste-ready brief")
+    esc.set_defaults(func=cmd_escalations)
 
     harvest = sub.add_parser("harvest", help="show cumulative savings")
     harvest.set_defaults(func=cmd_harvest)

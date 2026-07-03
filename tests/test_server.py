@@ -2,6 +2,7 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from kultivait.backends import Completion
+from kultivait.escalations import EscalationStore
 from kultivait.gates import Gate
 from kultivait.ledger import Ledger
 from kultivait.router import Router
@@ -58,6 +59,7 @@ def make_client(tmp_path, embed):
         backends=backends,
         ledger=Ledger(tmp_path / "ledger.jsonl"),
         gate=Gate(generate=lambda p: "FINDINGS: distilled.", compost_dir=tmp_path / "compost"),
+        escalations=EscalationStore(tmp_path / "escalations"),
     )
     return TestClient(app), backends
 
@@ -184,6 +186,40 @@ def test_tools_request_falls_back_from_cloud_to_local_tier(tmp_path):
     assert body["kultivait"]["tool_fallback"] is True
     assert len(backends["claude"].calls) == 0
     assert len(backends["llama3.1:8b"].calls) == 1
+
+
+def test_tool_fallback_archives_escalation_with_conversation(tmp_path):
+    import json
+
+    client, _ = make_client(tmp_path, embed=lambda text: np.array([0.1, 0.9]))
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "auto",
+            "tools": TOOLS,
+            "messages": [{"role": "user", "content": "draft a technical spec"}],
+        },
+    )
+    eid = resp.json()["kultivait"]["escalation_id"]
+    assert eid.startswith("esc-")
+    store = EscalationStore(tmp_path / "escalations")
+    listed = store.list()
+    assert [e.id for e in listed] == [eid]
+    assert listed[0].requested_tier == "claude"
+    assert store.load_messages(eid) == [{"role": "user", "content": "draft a technical spec"}]
+    # linked in the ledger entry too
+    entry = json.loads((tmp_path / "ledger.jsonl").read_text())
+    assert entry["escalation_id"] == eid
+
+
+def test_no_escalation_archived_without_fallback(tmp_path):
+    client, _ = make_client(tmp_path, embed=lambda text: np.array([0.9, 0.1]))
+    resp = client.post(
+        "/v1/chat/completions",
+        json={"model": "auto", "tools": TOOLS, "messages": [{"role": "user", "content": "rename"}]},
+    )
+    assert resp.json()["kultivait"]["escalation_id"] is None
+    assert EscalationStore(tmp_path / "escalations").list() == []
 
 
 def test_streaming_emits_tool_calls_delta(tmp_path):

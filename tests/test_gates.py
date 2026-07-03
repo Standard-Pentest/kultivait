@@ -17,6 +17,23 @@ def test_distill_produces_brief_and_measures_compression(tmp_path):
     assert result.tokens_before > result.tokens_after > 0
 
 
+def test_custom_template_overrides_default_prompt(tmp_path):
+    seen = {}
+
+    def spy_generate(prompt):
+        seen["prompt"] = prompt
+        return "BRIEF"
+
+    gate = Gate(
+        generate=spy_generate,
+        compost_dir=tmp_path,
+        template="HANDOFF for {transcript}",
+    )
+    result = gate.distill("the goods", from_phase="local", to_phase="cloud")
+    assert seen["prompt"] == "HANDOFF for the goods"
+    assert result.brief == "BRIEF"
+
+
 def test_full_transcript_is_composted_not_destroyed(tmp_path):
     gate = Gate(generate=fake_generate, compost_dir=tmp_path)
     transcript = "irreplaceable detail: the auth module uses legacy MD5 hashing"

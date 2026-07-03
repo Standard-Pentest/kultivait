@@ -154,9 +154,22 @@ at 32K — truncation still possible, hence detection below.
 - Live-verified with the user's actual spec prompt: requested=claude,
   served=qwen3:14b, tool_fallback=true, margin=0.0057 (razor-thin!).
 
-**Next: the cloud-ready brief (option 3 above)** — on would-escalate, run the
-pruning gate and emit a paste-ready distilled brief + recommended target,
-surfaced via `kultivait escalations` / metadata, never the response body.
+**The cloud-ready brief — SHIPPED (37 tests, live-verified).**
+- On tool_fallback the full conversation is archived instantly to
+  `~/.kultivait/escalations/` (EscalationStore, off the request path);
+  `kultivait.escalation_id` appears in response metadata and the ledger entry.
+- `kultivait escalations` lists them; `kultivait escalations --brief [ID]`
+  distills a paste-ready TASK/CONTEXT/PROGRESS/NEEDED brief (HANDOFF_PROMPT,
+  gemma4 distiller, Gate machinery — source composted/recoverable) and names
+  the target by tier ("take this to Claude"), never by model version.
+- Brief generation is lazy by design: distillation (~30s) happens when the
+  human decides to escalate, never inside an agent turn.
+- Known behavior: single-turn escalations produce briefs LONGER than the
+  source (structure overhead); the win is on multi-turn sessions.
+
+**Next candidates:** delegated dispatch (hand the brief to `claude -p` as an
+autonomous same-machine worker); route-on-intent (study margins now being
+logged); Anthropic-endpoint tools; ambient gates via hooks.
 
 ---
 

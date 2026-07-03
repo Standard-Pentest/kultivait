@@ -41,16 +41,22 @@ def _rough_tokens(text: str) -> int:
 
 
 class Gate:
-    def __init__(self, generate: Callable[[str], str], compost_dir: Path):
+    def __init__(
+        self,
+        generate: Callable[[str], str],
+        compost_dir: Path,
+        template: str = DISTILL_PROMPT,
+    ):
         self._generate = generate
         self._compost_dir = Path(compost_dir)
+        self._template = template
 
     def distill(self, transcript: str, *, from_phase: str, to_phase: str) -> HandoffBrief:
         compost_id = f"{from_phase}-{to_phase}-{uuid.uuid4().hex[:8]}"
         self._compost_dir.mkdir(parents=True, exist_ok=True)
         (self._compost_dir / f"{compost_id}.txt").write_text(transcript)
 
-        prompt = DISTILL_PROMPT.format(
+        prompt = self._template.format(
             from_phase=from_phase, to_phase=to_phase, transcript=transcript
         )
         brief = self._generate(prompt)
