@@ -862,6 +862,29 @@
     });
   });
 
+  // starter-prompt buttons — swap the label span only, keep icon intact
+  document.querySelectorAll("[data-copy-prompt]").forEach(btn => {
+    const label = btn.querySelector(".prompt-copy-label");
+    const original = label.textContent;
+    let timer;
+    btn.addEventListener("click", async () => {
+      clearTimeout(timer);
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copyPrompt);
+        label.textContent = "✓ Copied — now paste into your agent";
+      } catch {
+        const fallback = btn.parentElement.querySelector(".prompt-copy-fallback");
+        const range = document.createRange();
+        range.selectNodeContents(fallback);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        label.textContent = "Press ⌘C — prompt selected";
+      }
+      timer = setTimeout(() => { label.textContent = original; }, 1800);
+    });
+  });
+
   // scroll reveal
   const io = new IntersectionObserver(entries => {
     entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
