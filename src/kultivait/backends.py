@@ -1,4 +1,5 @@
-"""Model backends: local ollama and cloud CLIs, behind one interface.
+"""Model backends: local runtimes (ollama, llama.cpp) and cloud CLIs,
+behind one interface.
 
 `stream()` yields text deltas and finishes with a Completion carrying the
 final usage, so callers can tally the ledger after the stream ends.
@@ -159,6 +160,119 @@ class OllamaBackend:
             local=True,
             tool_calls=from_ollama_tool_calls(raw_calls) if raw_calls else None,
             truncated=is_truncated(tokens_in, self.num_ctx),
+        )
+
+
+def merge_tool_call_deltas(acc: "dict[int, dict]", deltas: "list[dict]") -> None:
+    """OpenAI streaming splits each tool call across chunks, keyed by index:
+    the first fragment carries id/name, later ones append argument text."""
+    for d in deltas:
+        slot = acc.setdefault(
+            d.get("index", 0),
+            {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+        )
+        if d.get("id"):
+            slot["id"] = d["id"]
+        fn = d.get("function") or {}
+        if fn.get("name"):
+            slot["function"]["name"] += fn["name"]
+        if fn.get("arguments"):
+            slot["function"]["arguments"] += fn["arguments"]
+
+
+class LlamaCppBackend:
+    """Local model via llama-server's OpenAI-compatible API. Free by definition.
+
+    Speaks OpenAI format natively, so no message or tool-call translation.
+    Context size is fixed at server launch (--ctx-size), not per request, and
+    llama.cpp doesn't pin token counts when clipping, so truncation detection
+    (an ollama quirk) is unavailable: `truncated` is always False. Tool calls
+    require the server to be launched with --jinja. In router mode the
+    request's `model` field selects which model the server loads.
+    """
+
+    supports_tools = True
+
+    def __init__(self, model: str, base_url: str = "http://localhost:8080"):
+        self.model = model
+        self.base_url = base_url
+
+    def _payload(self, messages: list[dict], tools: "list[dict] | None", stream: bool) -> dict:
+        payload = {"model": self.model, "messages": messages, "stream": stream}
+        if tools:
+            payload["tools"] = tools
+        return payload
+
+    @staticmethod
+    def _parse(data: dict) -> Completion:
+        message = data["choices"][0]["message"]
+        usage = data.get("usage") or {}
+        return Completion(
+            text=message.get("content") or "",
+            tokens_in=usage.get("prompt_tokens", 0),
+            tokens_out=usage.get("completion_tokens", 0),
+            cost_usd=0.0,
+            local=True,
+            tool_calls=message.get("tool_calls") or None,
+            truncated=False,
+        )
+
+    def complete(self, messages: list[dict], tools: "list[dict] | None" = None) -> Completion:
+        import httpx
+
+        r = httpx.post(
+            f"{self.base_url}/v1/chat/completions",
+            json=self._payload(messages, tools, stream=False),
+            timeout=300,
+        )
+        r.raise_for_status()
+        return self._parse(r.json())
+
+    def stream(
+        self, messages: list[dict], tools: "list[dict] | None" = None
+    ) -> Iterator["str | Completion"]:
+        import httpx
+
+        parts: list[str] = []
+        calls: dict[int, dict] = {}
+        usage: dict = {}
+        payload = self._payload(messages, tools, stream=True)
+        payload["stream_options"] = {"include_usage": True}
+        with httpx.stream(
+            "POST",
+            f"{self.base_url}/v1/chat/completions",
+            json=payload,
+            timeout=300,
+        ) as r:
+            r.raise_for_status()
+            for line in r.iter_lines():
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                body = line[len("data:"):].strip()
+                if body == "[DONE]":
+                    break
+                chunk = json.loads(body)
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                merge_tool_call_deltas(calls, delta.get("tool_calls") or [])
+                text = delta.get("content") or ""
+                if text:
+                    parts.append(text)
+                    yield text
+        tool_calls = [calls[i] for i in sorted(calls)] or None
+        yield Completion(
+            text="".join(parts),
+            tokens_in=usage.get("prompt_tokens", 0),
+            tokens_out=usage.get("completion_tokens", 0),
+            cost_usd=0.0,
+            local=True,
+            tool_calls=tool_calls,
+            truncated=False,
         )
 
 
