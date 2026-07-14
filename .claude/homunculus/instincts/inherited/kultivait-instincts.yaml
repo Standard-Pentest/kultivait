@@ -1,0 +1,445 @@
+# Instincts generated from https://github.com/Standard-Pentest/kultivait
+# Generated: 2026-07-14T21:44:46.338Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: kultivait-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Standard-Pentest/kultivait
+---
+
+# Kultivait Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: feat, docs
+
+## Evidence
+
+- 4 commits analyzed
+- Detected conventional commit pattern
+- Examples: feat(config): runtime + base-url coordinates for local backends, docs: llama.cpp router mode setup (presets, --jinja, embeddings)
+
+---
+id: kultivait-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Standard-Pentest/kultivait
+---
+
+# Kultivait Commit Length
+
+## Action
+
+Write moderate-length commit messages (~64 characters)
+
+## Evidence
+
+- Average commit message length: 64 chars
+- Based on 4 commits
+
+---
+id: kultivait-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Standard-Pentest/kultivait
+---
+
+# Kultivait Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: kultivait-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Standard-Pentest/kultivait
+---
+
+# Kultivait Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: kultivait-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Standard-Pentest/kultivait
+---
+
+# Kultivait Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: kultivait-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Standard-Pentest/kultivait
+---
+
+# Kultivait Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: kultivait-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Standard-Pentest/kultivait
+---
+
+# Kultivait Test Naming
+
+## Action
+
+Name test files using the pattern: *.test.ts
+
+## Evidence
+
+- File pattern: *.test.ts
+- Consistent across test files
+
+---
+id: kultivait-workflow-feature-implementation-with-tests
+trigger: "when doing feature implementation with tests"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Standard-Pentest/kultivait
+---
+
+# Kultivait Workflow Feature Implementation With Tests
+
+## Action
+
+Follow the feature-implementation-with-tests workflow:
+1. Edit or add implementation file in src/kultivait/
+2. Edit or add corresponding test file in tests/
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: src/kultivait/config.py, tests/test_config.py, src/kultivait/backends.py
+
+---
+id: kultivait-workflow-documentation-update
+trigger: "when doing documentation update"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Standard-Pentest/kultivait
+---
+
+# Kultivait Workflow Documentation Update
+
+## Action
+
+Follow the documentation-update workflow:
+1. Edit or add markdown files in the documentation (README.md, landing/start.md, etc.)
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: README.md, landing/start.md
+
+---
+id: kultivait-instinct-file-naming
+trigger: "When creating or renaming a Python file"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct File Naming
+
+## Action
+
+Use snake_case for the filename
+
+## Evidence
+
+- Pattern in src/kultivait/config.py
+- Pattern in src/kultivait/backends.py
+
+---
+id: kultivait-instinct-function-naming
+trigger: "When defining a function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- Naming convention specified in analysis
+
+---
+id: kultivait-instinct-class-naming
+trigger: "When defining a class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Class Naming
+
+## Action
+
+Use PascalCase for class names
+
+## Evidence
+
+- Naming convention specified in analysis
+
+---
+id: kultivait-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- Naming convention specified in analysis
+
+---
+id: kultivait-instinct-import-style
+trigger: "When importing modules within the package"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Import Style
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- Import style specified in analysis
+
+---
+id: kultivait-instinct-export-style
+trigger: "When exporting symbols from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Export style specified in analysis
+
+---
+id: kultivait-instinct-test-location
+trigger: "When adding or editing tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Test Location
+
+## Action
+
+Place test files in the separate 'tests/' folder
+
+## Evidence
+
+- Pattern in tests/test_config.py
+- Pattern in tests/test_backends.py
+
+---
+id: kultivait-instinct-test-type
+trigger: "When writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Test Type
+
+## Action
+
+Write unit tests
+
+## Evidence
+
+- Test types specified as 'unit'
+- Pattern in tests/test_config.py
+
+---
+id: kultivait-instinct-test-pattern
+trigger: "When naming a test file"
+confidence: 0.7
+domain: testing
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Test Pattern
+
+## Action
+
+Use the pattern '*.test.ts' for test filenames
+
+## Evidence
+
+- File pattern '*.test.ts' specified in analysis
+
+---
+id: kultivait-instinct-commit-format
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Commit Format
+
+## Action
+
+Use conventional commits format with prefixes like 'feat' or 'docs'
+
+## Evidence
+
+- Seen in commit 'feat(config): runtime + base-url coordinates for local backends'
+- Seen in commit 'docs: llama.cpp router mode setup (presets, --jinja, embeddings)'
+
+---
+id: kultivait-instinct-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Commit Length
+
+## Action
+
+Keep the commit message concise (around 64 characters on average)
+
+## Evidence
+
+- Average commit length is 64 characters
+
+---
+id: kultivait-instinct-feature-with-tests
+trigger: "When adding a new feature or backend"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Feature With Tests
+
+## Action
+
+Edit or add implementation file in src/kultivait/ and add corresponding unit test in tests/
+
+## Evidence
+
+- Workflow 'feature-implementation-with-tests' detected
+- Pattern in src/kultivait/config.py and tests/test_config.py
+
+---
+id: kultivait-instinct-documentation-update
+trigger: "When documenting new functionality or setup instructions"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Standard-Pentest/kultivait
+---
+
+# Kultivait Instinct Documentation Update
+
+## Action
+
+Edit or add markdown files in README.md or landing/start.md
+
+## Evidence
+
+- Workflow 'documentation-update' detected
+- Pattern in README.md and landing/start.md
+
