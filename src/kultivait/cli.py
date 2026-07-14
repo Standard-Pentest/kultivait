@@ -1,8 +1,9 @@
 """kultivait CLI: serve the proxy, inspect the harvest, dry-run a route.
 
-Configuration is detected live from the machine (installed ollama models,
-available CLIs) unless ~/.kultivait/config.toml exists — `kultivait init`
-writes that file so the decisions are visible and editable.
+Configuration is detected live from the machine (installed local models —
+ollama or llama.cpp — and available CLIs) unless ~/.kultivait/config.toml
+exists — `kultivait init` writes that file so the decisions are visible and
+editable.
 """
 
 import argparse
@@ -15,8 +16,15 @@ from pathlib import Path
 import httpx
 import numpy as np
 
-from kultivait.backends import CLIBackend, OllamaBackend
-from kultivait.config import KNOWN_CLIS, Config, detect, load_config, save_config
+from kultivait.backends import CLIBackend, LlamaCppBackend, OllamaBackend
+from kultivait.config import (
+    KNOWN_CLIS,
+    RUNTIME_URLS,
+    Config,
+    detect,
+    load_config,
+    save_config,
+)
 from kultivait.escalations import (
     HANDOFF_PROMPT,
     EscalationStore,
@@ -28,7 +36,8 @@ from kultivait.ledger import Ledger
 from kultivait.router import Router
 from kultivait.seeds import ROLE_SEEDS
 
-OLLAMA_URL = "http://localhost:11434"
+OLLAMA_URL = RUNTIME_URLS["ollama"]
+LLAMACPP_URL = os.environ.get("KULTIVAIT_LLAMACPP_URL", RUNTIME_URLS["llamacpp"])
 KULTIVAIT_HOME = Path.home() / ".kultivait"
 CONFIG_PATH = KULTIVAIT_HOME / "config.toml"
 LEDGER_PATH = KULTIVAIT_HOME / "ledger.jsonl"
@@ -43,6 +52,104 @@ def _survey_ollama() -> "tuple[list[str], dict[str, int]]":
     return [m["name"] for m in models], {m["name"]: m.get("size", 0) for m in models}
 
 
+def match_gguf_sizes(names: "list[str]", files: "dict[str, int]") -> "dict[str, int]":
+    """Router model ids and cache filenames drift (path prefixes flattened to
+    underscores, :quant suffixes, case varies): match when every token of the
+    id appears in the filename. Unmatched names are omitted — _param_billions
+    still reads a parameter count from the name itself."""
+    import re
+
+    def tokens(s: str) -> set:
+        return set(re.split(r"[/:_.\-]+", s.lower())) - {""}
+
+    sizes: dict[str, int] = {}
+    for name in names:
+        n = tokens(name)
+        for fname, size in files.items():
+            if n <= tokens(fname):
+                sizes[name] = size
+                break
+    return sizes
+
+
+def _local_llamacpp_models(
+    entries: "list[dict]", cache_files: "dict[str, int]"
+) -> "tuple[list[str], dict[str, int]]":
+    """Filter a router /v1/models listing to models actually on disk.
+
+    Router listings include downloadable HF suggestions; picking a tier that
+    isn't downloaded would trigger a surprise multi-GB fetch on first route.
+    On-disk models carry `--model <path>` in status.args (stat that path);
+    --hf-repo entries count only if a matching GGUF is already cached.
+    """
+    names: list[str] = []
+    sizes: dict[str, int] = {}
+    for m in entries:
+        args = m.get("status", {}).get("args", [])
+        path = Path(args[args.index("--model") + 1]) if "--model" in args else None
+        if path and path.exists():
+            names.append(m["id"])
+            sizes[m["id"]] = path.stat().st_size
+        elif "--hf-repo" in args:
+            matched = match_gguf_sizes([m["id"]], cache_files)
+            if m["id"] in matched:
+                names.append(m["id"])
+                sizes[m["id"]] = matched[m["id"]]
+    return names, sizes
+
+
+def _gguf_dirs() -> "list[Path]":
+    """Where llama-server caches GGUF files, most specific override first."""
+    override = os.environ.get("KULTIVAIT_LLAMACPP_MODELS_DIR") or os.environ.get(
+        "LLAMA_CACHE"
+    )
+    if override:
+        return [Path(override)]
+    return [
+        Path.home() / "Library" / "Caches" / "llama.cpp",  # macOS default
+        Path.home() / ".cache" / "llama.cpp",
+    ]
+
+
+def _survey_llamacpp() -> "tuple[list[str], dict[str, int]]":
+    """Names from the router's /v1/models (the authoritative request ids);
+    sizes by stat-ing GGUF files on disk, because /v1/models reports full
+    metadata only for currently-loaded models."""
+    r = httpx.get(f"{LLAMACPP_URL}/v1/models", timeout=10)
+    r.raise_for_status()
+    entries = r.json().get("data", [])
+    files: dict[str, int] = {}
+    for d in _gguf_dirs():
+        if d.expanduser().is_dir():
+            for f in d.expanduser().rglob("*.gguf"):
+                files[f.name] = f.stat().st_size
+    return _local_llamacpp_models(entries, files)
+
+
+def _reachable(url: str) -> bool:
+    try:
+        return httpx.get(url, timeout=2).status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def _detect_runtime() -> str:
+    """Prefer whichever local server is actually running; if both, ollama
+    (the eval-proven setup). KULTIVAIT_RUNTIME overrides."""
+    env = os.environ.get("KULTIVAIT_RUNTIME")
+    if env:
+        return env
+    if _reachable(f"{OLLAMA_URL}/api/tags"):
+        return "ollama"
+    if _reachable(f"{LLAMACPP_URL}/v1/models"):
+        return "llamacpp"
+    return "ollama"
+
+
+def _survey_local(runtime: str) -> "tuple[list[str], dict[str, int]]":
+    return _survey_llamacpp() if runtime == "llamacpp" else _survey_ollama()
+
+
 def _available_clis() -> "list[str]":
     return [cli for cli in KNOWN_CLIS if shutil.which(cli)]
 
@@ -51,8 +158,9 @@ def get_config() -> Config:
     if CONFIG_PATH.exists():
         config = load_config(CONFIG_PATH)
     else:
-        models, sizes = _survey_ollama()
-        config = detect(models, _available_clis(), sizes=sizes)
+        runtime = _detect_runtime()
+        models, sizes = _survey_local(runtime)
+        config = detect(models, _available_clis(), sizes=sizes, runtime=runtime)
     # env overrides win, always
     distill = os.environ.get("KULTIVAIT_DISTILL_MODEL")
     num_ctx = os.environ.get("KULTIVAIT_NUM_CTX")
@@ -69,17 +177,31 @@ def get_config() -> Config:
 
 def _require_embed_model(config: Config) -> str:
     if not config.embed_model:
-        sys.exit(
-            "kultivait needs a local embedding model to weigh prompts.\n"
-            "Pull one (274 MB), then retry:\n\n    ollama pull nomic-embed-text\n"
-        )
+        if config.runtime == "llamacpp":
+            hint = (
+                "Download a nomic-embed-text GGUF into your llama.cpp models dir\n"
+                "and mark it `embedding = 1` in a --models-preset INI\n"
+                "(see README: Using with llama.cpp), then retry."
+            )
+        else:
+            hint = "Pull one (274 MB), then retry:\n\n    ollama pull nomic-embed-text"
+        sys.exit(f"kultivait needs a local embedding model to weigh prompts.\n{hint}\n")
     return config.embed_model
 
 
-def _embed_batch(model: str, texts: "list[str]") -> np.ndarray:
+def _embed_batch(config: Config, texts: "list[str]") -> np.ndarray:
+    if config.runtime == "llamacpp":
+        r = httpx.post(
+            f"{config.embed_url()}/v1/embeddings",
+            json={"model": config.embed_model, "input": texts},
+            timeout=120,
+        )
+        r.raise_for_status()
+        data = sorted(r.json()["data"], key=lambda d: d["index"])
+        return np.array([d["embedding"] for d in data])
     r = httpx.post(
-        f"{OLLAMA_URL}/api/embed",
-        json={"model": model, "input": texts},
+        f"{config.embed_url()}/api/embed",
+        json={"model": config.embed_model, "input": texts},
         timeout=120,
     )
     r.raise_for_status()
@@ -87,10 +209,10 @@ def _embed_batch(model: str, texts: "list[str]") -> np.ndarray:
 
 
 def build_router(config: Config) -> Router:
-    model = _require_embed_model(config)
+    _require_embed_model(config)
     centroids = {}
     for tier in config.tiers:
-        vecs = _embed_batch(model, ROLE_SEEDS[tier.role])
+        vecs = _embed_batch(config, ROLE_SEEDS[tier.role])
         vecs = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
         centroids[tier.name] = vecs.mean(axis=0)
     return Router(centroids=centroids, capability_order=config.capability_order())
@@ -100,7 +222,11 @@ def build_backends(config: Config) -> dict:
     backends = {}
     for tier in config.tiers:
         if tier.kind == "ollama":
-            backends[tier.name] = OllamaBackend(tier.model, OLLAMA_URL, num_ctx=config.num_ctx)
+            backends[tier.name] = OllamaBackend(
+                tier.model, config.chat_base_url, num_ctx=config.num_ctx
+            )
+        elif tier.kind == "llamacpp":
+            backends[tier.name] = LlamaCppBackend(tier.model, config.chat_base_url)
         elif tier.kind == "cli":
             backends[tier.name] = CLIBackend(
                 tier.command, price_in=tier.price_in, price_out=tier.price_out
@@ -114,17 +240,26 @@ def _distill_generate_for(config: Config):
     import re
 
     def generate(prompt: str) -> str:
-        payload = {
-            "model": config.distill_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "options": {"num_ctx": config.num_ctx},
-        }
-        if (config.distill_model or "").startswith("qwen3"):
-            payload["think"] = False
-        r = httpx.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=600)
-        r.raise_for_status()
-        text = r.json()["message"]["content"]
+        messages = [{"role": "user", "content": prompt}]
+        if config.runtime == "llamacpp":
+            payload = {"model": config.distill_model, "messages": messages, "stream": False}
+            r = httpx.post(
+                f"{config.chat_base_url}/v1/chat/completions", json=payload, timeout=600
+            )
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"] or ""
+        else:
+            payload = {
+                "model": config.distill_model,
+                "messages": messages,
+                "stream": False,
+                "options": {"num_ctx": config.num_ctx},
+            }
+            if (config.distill_model or "").startswith("qwen3"):
+                payload["think"] = False
+            r = httpx.post(f"{config.chat_base_url}/api/chat", json=payload, timeout=600)
+            r.raise_for_status()
+            text = r.json()["message"]["content"]
         return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
     return generate
@@ -136,12 +271,14 @@ def build_gate(config: Config, template: "str | None" = None) -> Gate:
 
 
 def cmd_init(args: argparse.Namespace) -> None:
-    models, sizes = _survey_ollama()
+    runtime = _detect_runtime()
+    models, sizes = _survey_local(runtime)
     clis = _available_clis()
-    config = detect(models, clis, sizes=sizes)
+    config = detect(models, clis, sizes=sizes, runtime=runtime)
 
     print("kultivait surveyed your garden:\n")
-    print(f"  ollama models: {len(models)} found")
+    print(f"  local runtime: {runtime} ({config.chat_base_url})")
+    print(f"  local models:  {len(models)} found")
     print(f"  cloud CLIs:    {', '.join(clis) if clis else 'none — local-only mode'}\n")
     for tier in config.tiers:
         if tier.kind == "virtual":
@@ -151,7 +288,12 @@ def cmd_init(args: argparse.Namespace) -> None:
         else:
             served = f"{tier.model} (local, free)"
         print(f"  {tier.role:<10} -> {served}")
-    print(f"\n  embedding: {config.embed_model or 'MISSING — run: ollama pull nomic-embed-text'}")
+    embed_missing = (
+        "MISSING — download a nomic-embed GGUF"
+        if runtime == "llamacpp"
+        else "MISSING — run: ollama pull nomic-embed-text"
+    )
+    print(f"\n  embedding: {config.embed_model or embed_missing}")
     print(f"  distiller: {config.distill_model or 'MISSING — pull any 8B+ model'}")
 
     save_config(config, CONFIG_PATH)
@@ -168,7 +310,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
     print("cultivating centroids from seed prompts...", file=sys.stderr)
     app = create_app(
         router=build_router(config),
-        embed=lambda text: _embed_batch(config.embed_model, [text])[0],
+        embed=lambda text: _embed_batch(config, [text])[0],
         backends=build_backends(config),
         ledger=Ledger(LEDGER_PATH),
         gate=build_gate(config),
@@ -182,7 +324,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
 def cmd_route(args: argparse.Namespace) -> None:
     config = get_config()
     router = build_router(config)
-    decision = router.classify(_embed_batch(config.embed_model, [args.prompt])[0])
+    decision = router.classify(_embed_batch(config, [args.prompt])[0])
     print(json.dumps(decision.__dict__, indent=2))
 
 
