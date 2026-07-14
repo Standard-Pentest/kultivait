@@ -31,11 +31,12 @@ uv tool install --from git+https://github.com/Standard-Pentest/kultivaite kultiv
 kultivait init
 ```
 
-This surveys THEIR machine: which ollama models are pulled, which cloud CLIs
-(`claude` / `agy` / `gemini`) exist. The smallest capable model becomes the
-simple tier; the largest becomes the reasoning tier. Decisions are written to
-`~/.kultivait/config.toml` — editable by hand, and `init` can be re-run
-anytime.
+This surveys THEIR machine: which local runtime is running (ollama, or
+llama.cpp's `llama-server` in router mode), which models it has, and which
+cloud CLIs (`claude` / `agy` / `gemini`) exist. The smallest capable model
+becomes the simple tier; the largest becomes the reasoning tier. Decisions are
+written to `~/.kultivait/config.toml` — editable by hand, and `init` can be
+re-run anytime.
 
 No cloud CLIs? That is fine — local-only mode is a first-class citizen (see
 below).

@@ -135,11 +135,49 @@ Routing knows its limits; hygiene makes the handoff cheap.
 
 ## Requirements
 
-- [ollama](https://ollama.com) with at least one general model pulled —
-  `kultivait init` adapts to whatever you have
+- a local model runtime — either:
+  - [ollama](https://ollama.com) with at least one general model pulled, or
+  - [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` in
+    router mode (see below)
+  — `kultivait init` detects whichever is running and adapts to whatever
+  models you have
 - an embedding model (`ollama pull nomic-embed-text`, 274 MB — the installer
-  handles this)
+  handles this; for llama.cpp, a nomic-embed GGUF)
 - optional: `claude` / `agy` / `gemini` CLIs on PATH for cloud tiers
+
+### Using with llama.cpp instead of ollama
+
+Run `llama-server` in **router mode** — launched without `-m`, it lists your
+GGUF models at `/v1/models` and loads whichever one a request names. One
+wrinkle: the router won't serve `/v1/embeddings` unless the embedding model is
+marked as such in a preset file:
+
+```ini
+# presets.ini
+[nomic-embed-text-v1.5.Q8_0]
+model = /path/to/models/nomic-embed-text-v1.5.Q8_0.gguf
+embedding = 1
+```
+
+```bash
+llama-server --models-dir ~/models --models-preset presets.ini --jinja
+kultivait init    # detects the router on :8080
+```
+
+(`--jinja` enables tool calls.) `init` surveys the router's model list, sizes
+each GGUF from disk, and picks tiers exactly as it does for ollama —
+downloadable suggestions the router advertises but you haven't pulled are
+ignored. If both runtimes are running, ollama wins; force a choice with
+`KULTIVAIT_RUNTIME=llamacpp`. Non-default ports and model dirs:
+`KULTIVAIT_LLAMACPP_URL`, `KULTIVAIT_LLAMACPP_MODELS_DIR`.
+
+Prefer a dedicated embedding server instead of the preset? Run
+`llama-server -m nomic-embed-text.gguf --embedding --port 8081` and set
+`embed_base_url = "http://localhost:8081"` in `~/.kultivait/config.toml`.
+Empty `embed_base_url` means "same server as chat".
+
+Context size for llama.cpp is set at server launch (`--ctx-size`), not per
+request — kultivait's `num_ctx` and truncation detection apply to ollama only.
 
 ## Development
 
