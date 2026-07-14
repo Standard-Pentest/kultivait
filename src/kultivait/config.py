@@ -14,6 +14,12 @@ from pathlib import Path
 
 ROLES = ["simple", "reasoning", "docs", "architect"]  # capability order
 
+# Local runtimes and their default server addresses.
+RUNTIME_URLS = {
+    "ollama": "http://localhost:11434",
+    "llamacpp": "http://localhost:8080",
+}
+
 # Known embedding models (never generation candidates), preferred first.
 EMBED_MODELS = ["nomic-embed-text", "bge-m3", "all-minilm", "mxbai-embed"]
 
@@ -29,7 +35,7 @@ CLI_PRICING = {  # USD per million tokens, rough frontier-tier defaults
 class TierSpec:
     name: str
     role: str
-    kind: str  # "ollama" | "cli" | "virtual"
+    kind: str  # "ollama" | "llamacpp" | "cli" | "virtual"
     model: "str | None" = None
     command: "list[str] | None" = None
     price_in: float = 0.0
@@ -43,9 +49,17 @@ class Config:
     distill_model: "str | None" = None
     num_ctx: int = 32768
     port: int = 4114
+    runtime: str = "ollama"  # "ollama" | "llamacpp"
+    chat_base_url: str = RUNTIME_URLS["ollama"]
+    # llama.cpp may need a dedicated embedding server (its --embedding flag
+    # is server-wide); empty means "same server as chat".
+    embed_base_url: str = ""
 
     def capability_order(self) -> "list[str]":
         return [t.name for t in self.tiers]
+
+    def embed_url(self) -> str:
+        return self.embed_base_url or self.chat_base_url
 
 
 SIMPLE_TIER_FLOOR_B = 4.0  # below ~4B, "simple" work stops being reliable
@@ -71,7 +85,10 @@ def detect(
     ollama_models: "list[str]",
     available_clis: "list[str]",
     sizes: "dict[str, int] | None" = None,
+    runtime: str = "ollama",
 ) -> Config:
+    """`ollama_models` is any local model listing — ollama tags or GGUF
+    names/ids from a llama-server router; the sizing rules are identical."""
     sizes = sizes or {}
     embeds = [m for m in ollama_models if _is_embedding(m)]
     billions = {
@@ -95,8 +112,8 @@ def detect(
         above_floor = [m for m in general if billions[m] >= SIMPLE_TIER_FLOOR_B]
         simple = above_floor[0] if above_floor else general[-1]
         largest = general[-1]
-        tiers.append(TierSpec(name=simple, role="simple", kind="ollama", model=simple))
-        tiers.append(TierSpec(name=largest, role="reasoning", kind="ollama", model=largest))
+        tiers.append(TierSpec(name=simple, role="simple", kind=runtime, model=simple))
+        tiers.append(TierSpec(name=largest, role="reasoning", kind=runtime, model=largest))
 
     cli_by_role: dict[str, str] = {}
     for cli in available_clis:
@@ -123,12 +140,17 @@ def detect(
         tiers=tiers,
         embed_model=embed_model,
         distill_model=general[-1] if general else None,
+        runtime=runtime,
+        chat_base_url=RUNTIME_URLS.get(runtime, RUNTIME_URLS["ollama"]),
     )
 
 
 def save_config(config: Config, path: Path) -> None:
     lines = [
         "# kultivait configuration — regenerate anytime with: kultivait init",
+        f"runtime = {_toml_str(config.runtime)}",
+        f"chat_base_url = {_toml_str(config.chat_base_url)}",
+        f"embed_base_url = {_toml_str(config.embed_base_url)}",
         f"embed_model = {_toml_str(config.embed_model)}",
         f"distill_model = {_toml_str(config.distill_model)}",
         f"num_ctx = {config.num_ctx}",
@@ -171,4 +193,7 @@ def load_config(path: Path) -> Config:
         distill_model=data.get("distill_model") or None,
         num_ctx=data.get("num_ctx", 32768),
         port=data.get("port", 4114),
+        runtime=data.get("runtime") or "ollama",
+        chat_base_url=data.get("chat_base_url") or RUNTIME_URLS["ollama"],
+        embed_base_url=data.get("embed_base_url") or "",
     )
