@@ -13,6 +13,7 @@ import stat
 import subprocess
 import time
 from pathlib import Path
+from typing import Callable, Optional
 
 import httpx
 
@@ -82,7 +83,8 @@ def _promote(part: Path, dest: Path, sha256: str, log=print) -> bool:
 
 
 def _download(
-    client, url: str, dest: Path, expected_bytes: int, sha256: str = "", log=print
+    client, url: str, dest: Path, expected_bytes: int, sha256: str = "",
+    on_progress: "Optional[Callable[[int, int], None]]" = None, log=print,
 ) -> bool:
     """Stream to <dest>.part, resume via Range, verify, rename when complete.
 
@@ -122,12 +124,16 @@ def _download(
             for chunk in r.iter_bytes(CHUNK):
                 f.write(chunk)
                 done += len(chunk)
-                log(
-                    f"\r  {dest.name}: {done / 2**20:.0f}/{expected_bytes / 2**20:.0f} MB",
-                    end="",
-                    flush=True,
-                )
-        log("")
+                if on_progress is not None:
+                    on_progress(done, expected_bytes)
+                else:
+                    log(
+                        f"\r  {dest.name}: {done / 2**20:.0f}/{expected_bytes / 2**20:.0f} MB",
+                        end="",
+                        flush=True,
+                    )
+        if on_progress is None:
+            log("")
     if part.stat().st_size != expected_bytes:
         log(
             f"  {dest.name}: incomplete (got {part.stat().st_size / 2**20:.0f} MB, "
@@ -142,6 +148,7 @@ def download_models(
     dest: Path,
     confirm=ask,
     client: "httpx.Client | None" = None,
+    on_progress: "Optional[Callable[[int, int], None]]" = None,
     log=print,
 ) -> bool:
     """Confirm once (sizes shown), then fetch whatever isn't already on disk."""
@@ -164,7 +171,8 @@ def download_models(
     for m in todo:
         try:
             if not _download(
-                client, m.url(), dest / m.filename, m.approx_bytes, sha256=m.sha256, log=log
+                client, m.url(), dest / m.filename, m.approx_bytes,
+                sha256=m.sha256, on_progress=on_progress, log=log,
             ):
                 return False
         except (httpx.HTTPError, OSError) as exc:

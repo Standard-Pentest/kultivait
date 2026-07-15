@@ -187,6 +187,31 @@ def test_download_size_mismatch_leaves_part_and_reports_failure(tmp_path):
     assert any("incomplete" in line for line in lines)
 
 
+def test_download_on_progress_receives_byte_counts(tmp_path):
+    body = b"0123456789"
+    client = FakeClient(body)
+    seen = []
+    ok = bootstrap._download(
+        client, "http://x/tiny.gguf", tmp_path / "tiny.gguf", len(body),
+        on_progress=lambda done, total: seen.append((done, total)), log=_quiet,
+    )
+    assert ok is True
+    assert seen[-1] == (len(body), len(body))  # final call reports completion
+    assert all(total == len(body) for _, total in seen)
+
+
+def test_download_without_on_progress_still_logs_text(tmp_path):
+    body = b"0123456789"
+    client = FakeClient(body)
+    lines = []
+
+    def log(*args, **kwargs):
+        lines.append(" ".join(str(a) for a in args))
+
+    bootstrap._download(client, "http://x/tiny.gguf", tmp_path / "tiny.gguf", len(body), log=log)
+    assert any("MB" in line for line in lines)  # default path unchanged
+
+
 class RaisingStream(FakeStream):
     """Serves a few bytes then blows up mid-stream, like a dropped connection."""
 
