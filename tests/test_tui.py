@@ -44,6 +44,19 @@ def test_render_survey_shows_missing_embed_and_distiller():
     out = _plain(tui.render_survey("llamacpp", "http://localhost:8080",
                                    [], [], cfg))
     assert "MISSING" in out
+    assert "download a nomic-embed GGUF" in out   # llamacpp embed hint
+    assert "pull any 8B+ model" in out            # distiller hint
+
+
+def test_render_survey_missing_embed_hint_is_runtime_specific():
+    cfg = Config(
+        tiers=_config().tiers,
+        chat_base_url="http://localhost:11434",
+        embed_model=None,
+        distill_model=_config().distill_model,
+    )
+    out = _plain(tui.render_survey("ollama", "http://localhost:11434", [], [], cfg))
+    assert "ollama pull nomic-embed-text" in out   # ollama-specific remediation
 
 
 def test_ask_default_yes_contract_matches_bootstrap():

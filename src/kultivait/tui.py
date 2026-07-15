@@ -58,8 +58,13 @@ def render_survey(
             serves = tier.model or "—"
         table.add_row(tier.role, serves, f"[{color}]{note}[/{color}]")
 
-    embed = config.embed_model or "[red]MISSING[/red]"
-    distill = config.distill_model or "[red]MISSING[/red]"
+    embed_hint = (
+        "download a nomic-embed GGUF"
+        if runtime == "llamacpp"
+        else "run: ollama pull nomic-embed-text"
+    )
+    embed = config.embed_model or f"[red]MISSING[/red] — {embed_hint}"
+    distill = config.distill_model or "[red]MISSING[/red] — pull any 8B+ model"
     header = (
         f"[bold]local runtime[/bold]  {runtime} ({base_url})\n"
         f"[bold]local models[/bold]   {len(models)} found\n"
