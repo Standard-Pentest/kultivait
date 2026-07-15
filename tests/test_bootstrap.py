@@ -149,6 +149,74 @@ def test_download_restarts_when_server_ignores_range(tmp_path):
     assert (tmp_path / "tiny.gguf").read_bytes() == body
 
 
+def test_download_exact_size_part_renames_without_request(tmp_path):
+    body = b"0123456789"
+    (tmp_path / "tiny.gguf.part").write_bytes(body)
+    client = FakeClient(body)
+    ok = bootstrap._download(client, "http://x/tiny.gguf", tmp_path / "tiny.gguf", len(body), log=_quiet)
+    assert ok is True
+    assert client.requests == []  # no HTTP request needed at all
+    assert (tmp_path / "tiny.gguf").read_bytes() == body
+    assert not (tmp_path / "tiny.gguf.part").exists()
+
+
+def test_download_oversized_part_is_dropped_and_restarted(tmp_path):
+    body = b"0123456789"
+    (tmp_path / "tiny.gguf.part").write_bytes(body + b"garbage-past-the-end")
+    client = FakeClient(body)
+    ok = bootstrap._download(client, "http://x/tiny.gguf", tmp_path / "tiny.gguf", len(body), log=_quiet)
+    assert ok is True
+    assert "Range" not in client.requests[0][1]  # started clean, no resume header
+    assert (tmp_path / "tiny.gguf").read_bytes() == body
+
+
+def test_download_size_mismatch_leaves_part_and_reports_failure(tmp_path):
+    body = b"0123456789"
+    short_body = body[:6]  # connection closed cleanly but early
+    client = FakeClient(short_body)
+    lines = []
+
+    def log(*args, **kwargs):
+        lines.append(" ".join(str(a) for a in args))
+
+    ok = bootstrap._download(client, "http://x/tiny.gguf", tmp_path / "tiny.gguf", len(body), log=log)
+    assert ok is False
+    assert not (tmp_path / "tiny.gguf").exists()
+    assert (tmp_path / "tiny.gguf.part").read_bytes() == short_body
+    assert any("incomplete" in line for line in lines)
+
+
+class RaisingStream(FakeStream):
+    """Serves a few bytes then blows up mid-stream, like a dropped connection."""
+
+    def iter_bytes(self, chunk_size):
+        yield self._body[:3]
+        raise httpx.ReadError("connection dropped")
+
+
+class RaisingClient:
+    """A client whose stream always dies partway through — no clean fakes here."""
+
+    def __init__(self, body: bytes):
+        self.body = body
+        self.requests = []
+
+    def stream(self, method, url, headers=None, follow_redirects=False):
+        self.requests.append((url, dict(headers or {})))
+        return RaisingStream(200, self.body)
+
+
+def test_download_models_interrupted_download_returns_false_and_keeps_part(tmp_path):
+    body = b"0123456789" * 10_000
+    client = RaisingClient(body)
+    ok = bootstrap.download_models(
+        make_plan(pick("tiny.gguf", body)), tmp_path, confirm=lambda p: True, client=client, log=_quiet
+    )
+    assert ok is False
+    assert (tmp_path / "tiny.gguf.part").exists()
+    assert not (tmp_path / "tiny.gguf").exists()
+
+
 def test_download_models_skips_complete_files(tmp_path):
     body = b"0123456789"
     (tmp_path / "tiny.gguf").write_bytes(body)

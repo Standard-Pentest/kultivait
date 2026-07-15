@@ -100,6 +100,15 @@ MODEL_TABLE = [
     (24, QWEN3_4B, QWEN3_14B, 16384),
 ]
 
+assert all(row[3] in CTX_LADDER for row in MODEL_TABLE), (
+    "every MODEL_TABLE row's ctx must be a value plan() can step down to"
+)
+assert MIN_RAM_GB >= MODEL_TABLE[-1][0], (
+    "MIN_RAM_GB must be >= the smallest MODEL_TABLE row's floor, or "
+    "plan()'s `next(r for r in MODEL_TABLE if profile.ram_gb >= r[0])` "
+    "can raise StopIteration for a profile plan() already deemed eligible"
+)
+
 
 @dataclass(frozen=True)
 class SetupPlan:

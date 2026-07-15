@@ -57,12 +57,30 @@ def ensure_llamacpp(confirm=ask, run_cmd=subprocess.run, which=shutil.which) -> 
 CHUNK = 1 << 20
 
 
-def _download(client, url: str, dest: Path, expected_bytes: int, log=print) -> None:
-    """Stream to <dest>.part, resume via Range, rename when complete."""
+def _download(client, url: str, dest: Path, expected_bytes: int, log=print) -> bool:
+    """Stream to <dest>.part, resume via Range, rename when complete.
+
+    Returns False (leaving the .part in place) instead of raising when the
+    result doesn't check out — a mismatched size is a failed download, not a
+    partial success to silently promote to `dest`. Callers (download_models)
+    treat any exception during the transfer itself as the same kind of
+    recoverable failure.
+    """
     if dest.exists() and dest.stat().st_size == expected_bytes:
         log(f"  {dest.name}: already present")
-        return
+        return True
     part = dest.with_name(dest.name + ".part")
+    if part.exists():
+        part_size = part.stat().st_size
+        if part_size == expected_bytes:
+            # already fully fetched (e.g. a prior run died after the write
+            # but before the rename) — promote it and skip the request
+            part.rename(dest)
+            return True
+        if part_size > expected_bytes:
+            # can't Range-resume past the expected size; something's wrong
+            # with this .part (stale/corrupt) — drop it and start clean
+            part.unlink()
     headers, mode = {}, "wb"
     if part.exists():
         headers["Range"] = f"bytes={part.stat().st_size}-"
@@ -79,9 +97,17 @@ def _download(client, url: str, dest: Path, expected_bytes: int, log=print) -> N
                 log(
                     f"\r  {dest.name}: {done / 2**20:.0f}/{expected_bytes / 2**20:.0f} MB",
                     end="",
+                    flush=True,
                 )
         log("")
+    if part.stat().st_size != expected_bytes:
+        log(
+            f"  {dest.name}: incomplete (got {part.stat().st_size / 2**20:.0f} MB, "
+            f"expected {expected_bytes / 2**20:.0f} MB) — leaving .part to resume next run"
+        )
+        return False
     part.rename(dest)
+    return True
 
 
 def download_models(
@@ -109,7 +135,16 @@ def download_models(
     dest.mkdir(parents=True, exist_ok=True)
     client = client or httpx.Client(timeout=60)
     for m in todo:
-        _download(client, m.url(), dest / m.filename, m.approx_bytes, log=log)
+        try:
+            if not _download(client, m.url(), dest / m.filename, m.approx_bytes, log=log):
+                return False
+        except (httpx.HTTPError, OSError) as exc:
+            # a multi-GB fetch over a real network drops sometimes; that's
+            # not a bug, it's Tuesday — leave the .part alone and let the
+            # next `kultivait init` pick up the Range resume, no traceback
+            log(f"\n  {m.filename}: download interrupted ({exc})")
+            log("download interrupted — re-run `kultivait init` to resume from where it left off")
+            return False
     return True
 
 
