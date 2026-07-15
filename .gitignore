@@ -8,3 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+.vscode/settings.json
+
+# Locally-installed third-party skills (not project content)
+.agents/skills/using-superpowers/
+.claude/skills/using-superpowers
