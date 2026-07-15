@@ -18,6 +18,7 @@ from typing import Callable, Optional
 import httpx
 
 from kultivait.hardware import SetupPlan
+from kultivait import tui
 
 BREW_INSTALL_HINT = (
     "Homebrew is required to install llama.cpp automatically.\n"
@@ -48,7 +49,7 @@ def ensure_llamacpp(confirm=ask, run_cmd=subprocess.run, which=shutil.which) -> 
     if which("llama-server"):
         return "present"
     if not which("brew"):
-        print(BREW_INSTALL_HINT)
+        tui.console.print(BREW_INSTALL_HINT)
         return "advisory"
     if not confirm("Install llama.cpp via Homebrew (brew install llama.cpp)?"):
         return "declined"
@@ -146,10 +147,10 @@ def _download(
 def download_models(
     plan: SetupPlan,
     dest: Path,
-    confirm=ask,
+    confirm=tui.ask,
     client: "httpx.Client | None" = None,
     on_progress: "Optional[Callable[[int, int], None]]" = None,
-    log=print,
+    log=tui.log,
 ) -> bool:
     """Confirm once (sizes shown), then fetch whatever isn't already on disk."""
     todo = [
@@ -227,7 +228,7 @@ def write_artifacts(
 HEALTH_URL = "http://localhost:8080/v1/models"
 
 
-def offer_wired_limit(plan: SetupPlan, confirm=ask, run_cmd=subprocess.run, log=print) -> bool:
+def offer_wired_limit(plan: SetupPlan, confirm=ask, run_cmd=subprocess.run, log=tui.log) -> bool:
     """Only offered when plan() flagged the default GPU cap as too tight;
     consent is explicit twice — our confirm, then sudo's password prompt."""
     if not plan.wired_limit_mb:
@@ -255,7 +256,7 @@ def start_server(
     http_get=httpx.get,
     sleep=time.sleep,
     deadline_s: int = 60,
-    log=print,
+    log=tui.log,
 ) -> bool:
     """Launch detached, then poll /v1/models — first model load can be slow."""
     log(f"starting llama-server ({script})...")
@@ -290,14 +291,14 @@ def run(
     *,
     home: "Path | None" = None,
     gguf_dir: "Path | None" = None,
-    confirm=ask,
+    confirm=tui.ask,
     run_cmd=subprocess.run,
     which=shutil.which,
     popen=subprocess.Popen,
     http_get=httpx.get,
     sleep=time.sleep,
     client=None,
-    log=print,
+    log=tui.log,
     skip_install: bool = False,
 ) -> str:
     """Orchestrate the bootstrap: "ok" (server healthy), "aborted" (user
