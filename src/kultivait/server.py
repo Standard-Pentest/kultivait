@@ -3,6 +3,7 @@
 import hashlib
 import itertools
 import json
+import logging
 import os
 import time
 import uuid
@@ -15,6 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 from kultivait.backends import Backend, Completion
 from kultivait.effort import resolve_effort
@@ -857,11 +859,12 @@ def create_app(
             actual_tier, completion = _dispatch_complete(route, tools)
         except Exception as e:
             # provider error pre-response: Anthropic-shaped 502, not a raw 500
+            logger.exception(_provider_error_text(e))
             return JSONResponse(
                 status_code=502,
                 content={
                     "type": "error",
-                    "error": {"type": "api_error", "message": _provider_error_text(e)},
+                    "error": {"type": "api_error", "message": "Upstream provider error."},
                 },
             )
         _record(actual_tier, completion, latency_s=time.time() - t_dispatch, **meta)
